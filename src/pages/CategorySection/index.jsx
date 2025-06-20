@@ -1,6 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { fetchPostsByCategory, fetchCategories, fetchMedia } from '../../connection/Fetch-data';
+import {
+  fetchPostsByCategory,
+  fetchCategories,
+  fetchMedia,
+} from '../../connection/Fetch-data';
 
 const postCountPerCategory = {
   0: 3,
@@ -19,44 +23,56 @@ const CategoriesSections = () => {
   const getDisplayCount = (categoryId, index) => {
     return postCountPerCategory[categoryId] || [3, 2][index % 2];
   };
+
   useEffect(() => {
     const fetchAllData = async () => {
       try {
         setIsLoading(true);
+
         const allCategories = await fetchCategories();
         const limitedCategories = allCategories.slice(0, 4);
-
         setCategories(limitedCategories);
 
-        const postsPromises = limitedCategories.map(cat =>
-          fetchPostsByCategory(cat.id).then(res => res || [])
+        const postsResults = await Promise.all(
+          limitedCategories.map(cat => fetchPostsByCategory(cat.id))
         );
-        const postsResults = await Promise.all(postsPromises);
 
-        const mediaIdSet = new Set();
         const categoryPostsMap = {};
+        const mediaIds = [];
 
-        limitedCategories.forEach((cat, index) => {
-          const posts = postsResults[index];
-          categoryPostsMap[cat.id] = posts;
-          posts.forEach(post => {
+        postsResults.forEach((posts, index) => {
+          const catId = limitedCategories[index].id;
+          const validPosts = posts || [];
+          categoryPostsMap[catId] = validPosts;
+
+          validPosts.forEach(post => {
             if (post.featured_media) {
-              mediaIdSet.add(post.featured_media);
+              mediaIds.push(post.featured_media);
             }
           });
         });
 
-        const mediaFetchPromises = Array.from(mediaIdSet).map(id =>
-          fetchMedia(id).then(data => [id, data?.source_url || '/fallback-image.jpg'])
+        // Unique media IDs only
+        const uniqueMediaIds = [...new Set(mediaIds)];
+
+        const mediaResults = await Promise.all(
+          uniqueMediaIds.map(async id => {
+            try {
+              const data = await fetchMedia(id);
+              return [id, data?.source_url || '/fallback-image.jpg'];
+            } catch {
+              return [id, '/fallback-image.jpg'];
+            }
+          })
         );
-        const mediaResults = await Promise.all(mediaFetchPromises);
+
         const mediaObj = Object.fromEntries(mediaResults);
 
         setPostsByCategory(categoryPostsMap);
         setMediaMap(mediaObj);
-        setIsLoading(false);
       } catch (error) {
         console.error('Error fetching data:', error);
+      } finally {
         setIsLoading(false);
       }
     };
@@ -64,9 +80,7 @@ const CategoriesSections = () => {
     fetchAllData();
   }, []);
 
-
-  const getMediaUrl = (mediaId) =>
-    mediaMap[mediaId] || '/fallback-image.jpg';
+  const getMediaUrl = mediaId => mediaMap[mediaId] || '/fallback-image.jpg';
 
   if (categories.length === 0 || isLoading) {
     return (
@@ -106,7 +120,7 @@ const CategoriesSections = () => {
             </div>
 
             <div className={`grid ${gridCols} gap-6`}>
-              {postsToShow.map((post) =>
+              {postsToShow.map(post =>
                 index === 1 ? (
                   <article
                     key={post.id}
